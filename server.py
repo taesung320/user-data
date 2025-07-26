@@ -1,6 +1,7 @@
 import json
 import os
 from flask import Flask, request
+import base64
 
 app = Flask(__name__)
 
@@ -14,7 +15,7 @@ class Config:
         # 기본 설정값
         defaults = {
             'username': 'root',
-            'password_hash': 'your_password_hash_here',
+            'password': 'your_password_here',
             'ssh_key': 'your_ssh_key_here',
             'server_host': '0.0.0.0',
             'server_port': 8080,
@@ -31,7 +32,7 @@ class Config:
                     json_config = json.load(f)
                     config_data = {
                         'username': json_config.get('default_user', {}).get('username', defaults['username']),
-                        'password_hash': json_config.get('default_user', {}).get('password_hash', defaults['password_hash']),
+                        'password': json_config.get('default_user', {}).get('password', defaults['password']),
                         'ssh_key': json_config.get('ssh', {}).get('public_key', defaults['ssh_key']),
                         'server_host': json_config.get('server', {}).get('host', defaults['server_host']),
                         'server_port': json_config.get('server', {}).get('port', defaults['server_port']),
@@ -47,7 +48,7 @@ class Config:
         
         # 환경변수로 오버라이드 (우선순위 높음)
         self.username = os.getenv('DEFAULT_USERNAME', config_data['username'])
-        self.password_hash = os.getenv('DEFAULT_PASSWORD_HASH', config_data['password_hash'])
+        self.password = os.getenv('DEFAULT_PASSWORD', config_data['password'])
         self.ssh_key = os.getenv('SSH_PUBLIC_KEY', config_data['ssh_key'])
         self.server_host = os.getenv('SERVER_HOST', config_data['server_host'])
         self.server_port = int(os.getenv('SERVER_PORT', config_data['server_port']))
@@ -56,7 +57,7 @@ class Config:
         # 환경변수가 사용되었는지 확인
         env_vars_used = []
         if os.getenv('DEFAULT_USERNAME'): env_vars_used.append('DEFAULT_USERNAME')
-        if os.getenv('DEFAULT_PASSWORD_HASH'): env_vars_used.append('DEFAULT_PASSWORD_HASH')
+        if os.getenv('DEFAULT_PASSWORD'): env_vars_used.append('DEFAULT_PASSWORD')
         if os.getenv('SSH_PUBLIC_KEY'): env_vars_used.append('SSH_PUBLIC_KEY')
         if os.getenv('SERVER_HOST'): env_vars_used.append('SERVER_HOST')
         if os.getenv('SERVER_PORT'): env_vars_used.append('SERVER_PORT')
@@ -66,7 +67,7 @@ class Config:
             print(f"✅ 환경변수로 오버라이드된 설정: {', '.join(env_vars_used)}")
         
         # 보안 경고
-        if self.password_hash in ['your_password_hash_here', 'dlsvmfk00##']:
+        if self.password in ['your_password_here', 'dlsvmfk00##']:
             print("🚨 경고: 기본 비밀번호를 사용 중입니다. config.json 또는 환경변수로 변경하세요!")
         
         if self.ssh_key == 'your_ssh_key_here':
@@ -80,29 +81,26 @@ def user_data(vmname):
     """VM별 cloud-init user-data 생성"""
     
     user_data = f"""#cloud-config
-autoinstall:
-  version: 1
-  identity:
-    hostname: {vmname}
-    username: {config.username}
-    password: {config.password_hash}
-  ssh:
-    install-server: true
-    authorized-keys:
+growpart:
+  mode: 'off'
+locale: en_US.UTF-8
+preserve_hostname: true
+resize_rootfs: false
+ssh_pwauth: true
+
+users:
+  - name: deploy
+    gecos: {vmname}
+    groups: adm,cdrom,dip,lxd,plugdev,sudo
+    lock_passwd: false
+    plain_text_passwd: {config.password}
+    shell: /bin/bash
+    ssh_authorized_keys:
       - {config.ssh_key}
-  storage:
-    layout:
-      name: {config.storage_layout}
-  packages:
-    - openssh-server
-    - curl
-    - wget
-  runcmd:
-    - systemctl enable ssh
-    - systemctl start ssh
 """
-    
-    return user_data, 200, {'Content-Type': 'text/plain'}
+    # base64 encode
+    cloud_config_b64 = base64.b64encode(user_data.encode("utf-8")).decode("utf-8")
+    return cloud_config_b64, 200, {'Content-Type': 'text/plain'}
 
 @app.route("/vm/<vmname>/meta-data")
 def meta_data(vmname):
@@ -125,7 +123,7 @@ def config_status():
     """현재 설정 상태 확인 (민감정보 제외)"""
     return {
         "username": config.username,
-        "password_configured": "Yes" if config.password_hash != 'your_password_hash_here' else "No (using default)",
+        "password_configured": "Yes" if config.password != 'your_password_here' else "No (using default)",
         "ssh_key_configured": "Yes" if config.ssh_key != 'your_ssh_key_here' else "No (using default)",
         "server_host": config.server_host,
         "server_port": config.server_port,
