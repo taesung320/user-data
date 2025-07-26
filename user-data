@@ -1,0 +1,15 @@
+autoinstall:
+  version: 1
+  identity:
+    hostname: test
+    username: ubuntu
+    password: "$6$rounds=4096$abc123...암호화된패스워드"
+  ssh:
+    install-server: true
+  storage:
+    layout:
+      name: direct
+  packages:
+    - net-tools
+    - docker.io
+
